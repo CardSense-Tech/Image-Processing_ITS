@@ -29,15 +29,15 @@
     .list{font-size:13px;line-height:1.5;opacity:.9}
     .error{color:#ffb4b4}
   </style>
-  <!-- TensorFlow.js -->
+  
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.19.0/dist/tf.min.js"></script>
-  <!-- Prefer stable CPU backend -->
+  
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.19.0/dist/tf-backend-wasm.min.js"></script>
-  <!-- Face detection: BlazeFace -->
+  
   <script src="https://unpkg.com/@tensorflow-models/blazeface@0.0.7/dist/blazeface.js"></script>
-  <!-- Person segmentation: BodyPix -->
+  
   <script src="https://unpkg.com/@tensorflow-models/body-pix@2.2.0/dist/body-pix.js"></script>
-  <!-- Zip + save -->
+  
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 </head>
@@ -48,7 +48,7 @@
   </header>
 
   <main>
-    <!-- Controls -->
+    
     <section class="card pane" id="controls">
       <div>
         <label>1) Input images (single/multiple)</label>
@@ -60,7 +60,7 @@
         </div>
       </div>
 
-      <!-- Fixed settings (display only) -->
+      
       <div class="grid">
         <div><label>Aspect ratio</label><input value="5:6 (fixed)" disabled></div>
         <div><label>Output long edge</label><input value="1200 px (fixed)" disabled></div>
@@ -76,12 +76,7 @@
         <button class="ghost" id="btnClear" type="button">Clear</button>
       </div>
 
-      <div class="list">
-        <p><strong>BG:</strong> Using hard-coded <code>bg.png</code> (place it next to <code>index.html</code>).</p>
-      </div>
-    </section>
-
-    <!-- Previews -->
+    
     <section class="card">
       <div class="pane">
         <div class="row" style="justify-content:space-between;align-items:center">
@@ -110,18 +105,17 @@
   </footer>
 
 <script>
-/* ---------- FIXED CONSTANTS ---------- */
-const ASPECT = 5/6;          // 5:6 portrait
-const OUTPUT_LONG = 1200;    // px on long edge
-const ZOOM = 1.18;           // tighter framing around face
-const Y_OFFSET = 0.06;       // headroom offset (downwards)
-const FEATHER_PX = 3;        // mask softening
-const MIME = 'image/png';    // output format
-const FILE_PREFIX = 'output_';
-const BG_SRC = 'bg.png';     // hard-coded background
-const MAX_INPUT_SIDE = 1600; // downscale huge inputs to avoid OOM
 
-/* ---------- Helpers ---------- */
+const ASPECT = 5/6;          
+const OUTPUT_LONG = 1200;    
+const ZOOM = 1.18;           
+const Y_OFFSET = 0.06;       
+const FEATHER_PX = 3;        
+const MIME = 'image/png';    
+const FILE_PREFIX = 'output_';
+const BG_SRC = 'bg.png';     
+const MAX_INPUT_SIDE = 1600; 
+
 function clamp(v,min,max){return Math.min(max,Math.max(min,v));}
 function createCanvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
 function drawContain(ctx,imgW,imgH,canW,canH){
@@ -141,7 +135,7 @@ function loadImage(file){
     reader.readAsDataURL(file);
   });
 }
-/* Downscale large images to max side length (keeps aspect) */
+
 function scaleToMaxSide(img, maxSide){
   const w = img.width, h = img.height;
   const side = Math.max(w,h);
@@ -149,19 +143,19 @@ function scaleToMaxSide(img, maxSide){
   const scale = maxSide / side;
   const cw = Math.round(w * scale), ch = Math.round(h * scale);
   const c = createCanvas(cw, ch);
-  const ctx = c.getContext('2d', { willReadFrequently: true }); /* ✅ */
+  const ctx = c.getContext('2d', { willReadFrequently: true }); 
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, cw, ch);
-  return c; // canvas is valid input for TFJS models
+  return c; s
 }
 
-/* ---------- Models & Backend ---------- */
+
 let blazefaceModel=null, bodyPixModel=null, hardBG=null;
 const statusEl=document.getElementById('status');
 
 (async function init(){
   statusEl.textContent='Loading backend…';
-  // Prefer WASM (CPU). If not available, fallback to WebGL with safer flags.
+  
   try { await tf.setBackend('wasm'); } catch(e) {}
   await tf.ready();
   if (tf.getBackend() !== 'wasm') {
@@ -182,7 +176,7 @@ const statusEl=document.getElementById('status');
     bodyPixModel = await bodyPix.load({ architecture:'MobileNetV1', outputStride:16, multiplier:0.75, quantBytes:2 });
   }
 
-  // Preload hard-coded background
+  
   hardBG = await new Promise((res,rej)=>{
     const img=new Image();
     img.onload=()=>res(img);
@@ -193,10 +187,10 @@ const statusEl=document.getElementById('status');
   statusEl.textContent='Models: ready ✅';
 })();
 
-/* ---------- Elements ---------- */
+
 const srcCanvas=document.getElementById('srcCanvas');
 const outCanvas=document.getElementById('outCanvas');
-/* ✅ use willReadFrequently for frequent readbacks */
+
 const srcCtx=srcCanvas.getContext('2d', { willReadFrequently: true });
 const outCtx=outCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -217,7 +211,7 @@ btnClear.addEventListener('click',()=>{
   btnZip.disabled=true;
 });
 
-/* Merge folder files into imageFiles */
+
 dirPicker.addEventListener('change',(e)=>{
   const dt=new DataTransfer();
   [...imageFiles.files||[]].forEach(f=>dt.items.add(f));
@@ -252,13 +246,13 @@ btnProcess.addEventListener('click', async ()=>{
       const origImg=await loadImage(files[i]);
       const img = scaleToMaxSide(origImg, MAX_INPUT_SIDE);
 
-      // Source preview
+      
       const W = img.width || img.naturalWidth, H = img.height || img.naturalHeight;
       const fit=drawContain(srcCtx, W, H, srcCanvas.width, srcCanvas.height);
       srcCtx.clearRect(0,0,srcCanvas.width,srcCanvas.height);
       srcCtx.drawImage(img, fit.dx, fit.dy, fit.dw, fit.dh);
 
-      // Face detect (largest)
+      
       const preds = await blazefaceModel.estimateFaces(img, false);
       let faceBox={x:W*0.25,y:H*0.2,w:W*0.5,h:H*0.6};
       if(preds && preds.length){
@@ -271,7 +265,7 @@ btnProcess.addEventListener('click', async ()=>{
         if(best) faceBox=best;
       }
 
-      // Crop around face
+      
       const ar=ASPECT;
       const faceCenter={cx: faceBox.x + faceBox.w/2, cy: faceBox.y + faceBox.h/2};
       const baseSize = Math.max(faceBox.w, faceBox.h) * (2.2/ ZOOM);
@@ -282,25 +276,25 @@ btnProcess.addEventListener('click', async ()=>{
       cropX = clamp(cropX, 0, W - cropW);
       cropY = clamp(cropY, 0, H - cropH);
 
-      // Segmentation
+      
       const segmentation = await bodyPixModel.segmentPerson(img, {
         internalResolution: 'medium',
         segmentationThreshold: 0.9
       });
 
-      // Build masked person (person kept)
+      
       const maskCanvas = createCanvas(W, H);
-      const mctx = maskCanvas.getContext('2d', { willReadFrequently: true }); /* ✅ */
+      const mctx = maskCanvas.getContext('2d', { willReadFrequently: true }); 
       mctx.drawImage(img, 0,0);
 
       const mask = bodyPix.toMask(
         segmentation,
-        {r:0,g:0,b:0,a:255},   // person opaque
-        {r:0,g:0,b:0,a:0}      // background transparent
+        {r:0,g:0,b:0,a:255},   
+        {r:0,g:0,b:0,a:0}      
       );
 
       const maskLayer = createCanvas(W, H);
-      const mlctx = maskLayer.getContext('2d', { willReadFrequently: true }); /* ✅ */
+      const mlctx = maskLayer.getContext('2d', { willReadFrequently: true }); 
       if(FEATHER_PX>0){ mlctx.filter = `blur(${FEATHER_PX}px)`; }
       mlctx.putImageData(mask,0,0);
 
@@ -308,25 +302,25 @@ btnProcess.addEventListener('click', async ()=>{
       mctx.drawImage(maskLayer, 0,0);
       mctx.globalCompositeOperation = 'source-over';
 
-      // Compose final
+      
       const targetW = ar>=1? OUTPUT_LONG : Math.round(OUTPUT_LONG*ar);
       const targetH = ar>=1? Math.round(OUTPUT_LONG/ar) : OUTPUT_LONG;
       outCanvas.width=targetW; outCanvas.height=targetH; outCtx.clearRect(0,0,targetW,targetH);
 
-      // Draw BG (cover)
+      
       const bgScale = Math.max(targetW/hardBG.width, targetH/hardBG.height);
       const bgDW = hardBG.width * bgScale, bgDH = hardBG.height * bgScale;
       const bgDX = (targetW - bgDW) / 2, bgDY = (targetH - bgDH) / 2;
       outCtx.drawImage(hardBG, bgDX, bgDY, bgDW, bgDH);
 
-      // Draw foreground crop
+      
       const scaleToTarget = Math.min(targetW/cropW, targetH/cropH);
       const drawW = cropW * scaleToTarget, drawH = cropH * scaleToTarget;
       const drawX = (targetW - drawW)/2, drawY = (targetH - drawH)/2;
       outCtx.imageSmoothingQuality='high';
       outCtx.drawImage(maskCanvas, cropX, cropY, cropW, cropH, drawX, drawY, drawW, drawH);
 
-      // Export
+      
       const dataUrl = outCanvas.toDataURL(MIME);
       const outName = FILE_PREFIX + (i+1) + (MIME==='image/png'?'.png':'.jpg');
 
@@ -337,7 +331,7 @@ btnProcess.addEventListener('click', async ()=>{
       const base64 = dataUrl.split(",")[1];
       zip.file(outName, base64, { base64: true });
 
-      // Yield to free memory between files
+      
       await tf.nextFrame();
 
     } catch(err){
@@ -359,3 +353,4 @@ btnProcess.addEventListener('click', async ()=>{
 </script>
 </body>
 </html>
+
