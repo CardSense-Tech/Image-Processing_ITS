@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Face Crop + BG Replace</title>
+  <style>
+    :root{--gap:14px;--radius:16px;--shadow:0 8px 24px rgba(0,0,0,.12)}
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:#0b1020;color:#eaf0ff;margin:0}
+    header{padding:24px 20px;border-bottom:1px solid rgba(255,255,255,.08);position:sticky;top:0;background:#0b1020;z-index:10}
+    h1{margin:0;font-size:clamp(18px,2vw,26px)}
+    main{display:grid;grid-template-columns:360px 1fr;gap:var(--gap);padding:var(--gap)}
+    @media (max-width:1000px){main{grid-template-columns:1fr}}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.04));border:1px solid rgba(255,255,255,.1);border-radius:var(--radius);box-shadow:var(--shadow)}
+    .pane{padding:16px}
+    label{font-size:12px;opacity:.9}
+    input[type="file"],button{width:100%;margin-top:6px;margin-bottom:14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#eaf0ff;padding:10px 12px;outline:none}
+    button{cursor:pointer;font-weight:600;letter-spacing:.2px}
+    button.primary{background:#5e7cff;border-color:#6e8bff}
+    button.ghost{background:transparent;border-color:rgba(255,255,255,.2)}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .preview-wrap{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);padding:var(--gap)}
+    .preview{background:rgba(255,255,255,.03);border:1px dashed rgba(255,255,255,.15);border-radius:var(--radius);padding:12px;overflow:auto}
+    canvas{max-width:100%;height:auto;border-radius:10px;background:#111}
+    .row{display:flex;gap:10px;align-items:center}
+    .hint{font-size:12px;opacity:.7}
+    .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);font-size:12px}
+    footer{padding:20px;text-align:center;opacity:.7}
+    .list{font-size:13px;line-height:1.5;opacity:.9}
+    .error{color:#ffb4b4}
+  </style>
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.19.0/dist/tf.min.js"></script>
+  <!-- Prefer stable CPU backend -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.19.0/dist/tf-backend-wasm.min.js"></script>
+  <!-- Face detection: BlazeFace -->
+  <script src="https://unpkg.com/@tensorflow-models/blazeface@0.0.7/dist/blazeface.js"></script>
+  <!-- Person segmentation: BodyPix -->
+  <script src="https://unpkg.com/@tensorflow-models/body-pix@2.2.0/dist/body-pix.js"></script>
+  <!-- Zip + save -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Face Crop + Background Replace (Client-side)</h1>
+    <div class="hint">Single image or batch folder • Face-aware crop • Hard-coded gradient BG • Export PNG or ZIP</div>
+  </header>
+
+  <main>
+    <!-- Controls -->
+    <section class="card pane" id="controls">
+      <div>
+        <label>1) Input images (single/multiple)</label>
+        <input id="imageFiles" type="file" accept="image/*" multiple />
+        <div class="hint">For folder batch (Chromium): use directory selection.</div>
+        <div class="row">
+          <label class="chip"><input id="dirPicker" type="file" webkitdirectory style="display:none" /><span>Choose Folder…</span></label>
+          <button class="ghost" id="btnFolder" type="button">Pick Folder</button>
+        </div>
+      </div>
+
+      <!-- Fixed settings (display only) -->
+      <div class="grid">
+        <div><label>Aspect ratio</label><input value="5:6 (fixed)" disabled></div>
+        <div><label>Output long edge</label><input value="1200 px (fixed)" disabled></div>
+        <div><label>Zoom</label><input value="1.18 (fixed)" disabled></div>
+        <div><label>Vertical offset</label><input value="0.06 (fixed)" disabled></div>
+        <div><label>Mask feather</label><input value="3 px (fixed)" disabled></div>
+        <div><label>Format</label><input value="PNG (fixed)" disabled></div>
+      </div>
+
+      <div class="row">
+        <button class="primary" id="btnProcess" type="button">Process Selected</button>
+        <button class="ghost" id="btnZip" type="button" disabled>Download ZIP</button>
+        <button class="ghost" id="btnClear" type="button">Clear</button>
+      </div>
+
+      <div class="list">
+        <p><strong>BG:</strong> Using hard-coded <code>bg.png</code> (place it next to <code>index.html</code>).</p>
+      </div>
+    </section>
+
+    <!-- Previews -->
+    <section class="card">
+      <div class="pane">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Preview</h3>
+          <span id="status" class="chip">Models: loading…</span>
+        </div>
+      </div>
+      <div class="preview-wrap">
+        <div class="preview">
+          <h4>Source</h4>
+          <canvas id="srcCanvas" width="640" height="480"></canvas>
+        </div>
+        <div class="preview">
+          <h4>Result</h4>
+          <canvas id="outCanvas" width="640" height="480"></canvas>
+        </div>
+      </div>
+      <div class="pane">
+        <div id="downloads" class="list"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Product Of CardSense Tech
+  </footer>
+
+<script>
+/* ---------- FIXED CONSTANTS ---------- */
+const ASPECT = 5/6;          // 5:6 portrait
+const OUTPUT_LONG = 1200;    // px on long edge
+const ZOOM = 1.18;           // tighter framing around face
+const Y_OFFSET = 0.06;       // headroom offset (downwards)
+const FEATHER_PX = 3;        // mask softening
+const MIME = 'image/png';    // output format
+const FILE_PREFIX = 'output_';
+const BG_SRC = 'bg.png';     // hard-coded background
+const MAX_INPUT_SIDE = 1600; // downscale huge inputs to avoid OOM
+
+/* ---------- Helpers ---------- */
+function clamp(v,min,max){return Math.min(max,Math.max(min,v));}
+function createCanvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
+function drawContain(ctx,imgW,imgH,canW,canH){
+  const s=Math.min(canW/imgW, canH/imgH);
+  const dw=imgW*s, dh=imgH*s;
+  const dx=(canW-dw)/2, dy=(canH-dh)/2;
+  return {dx,dy,dw,dh,scale:s};
+}
+function loadImage(file){
+  return new Promise((resolve)=>{
+    const reader=new FileReader();
+    reader.onload=(e)=>{
+      const img=new Image();
+      img.onload=()=>resolve(img);
+      img.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+/* Downscale large images to max side length (keeps aspect) */
+function scaleToMaxSide(img, maxSide){
+  const w = img.width, h = img.height;
+  const side = Math.max(w,h);
+  if (side <= maxSide) return img;
+  const scale = maxSide / side;
+  const cw = Math.round(w * scale), ch = Math.round(h * scale);
+  const c = createCanvas(cw, ch);
+  const ctx = c.getContext('2d', { willReadFrequently: true }); /* ✅ */
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, cw, ch);
+  return c; // canvas is valid input for TFJS models
+}
+
+/* ---------- Models & Backend ---------- */
+let blazefaceModel=null, bodyPixModel=null, hardBG=null;
+const statusEl=document.getElementById('status');
+
+(async function init(){
+  statusEl.textContent='Loading backend…';
+  // Prefer WASM (CPU). If not available, fallback to WebGL with safer flags.
+  try { await tf.setBackend('wasm'); } catch(e) {}
+  await tf.ready();
+  if (tf.getBackend() !== 'wasm') {
+    await tf.setBackend('webgl');
+    try {
+      tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+      tf.env().set('WEBGL_PACK', true);
+    } catch(e) {}
+  }
+
+  statusEl.textContent='Loading models…';
+  blazefaceModel = await blazeface.load();
+
+  statusEl.textContent='Face: OK, Loading segmentation…';
+  if (tf.getBackend() === 'wasm') {
+    bodyPixModel = await bodyPix.load({ architecture:'ResNet50', outputStride:16, quantBytes:2 });
+  } else {
+    bodyPixModel = await bodyPix.load({ architecture:'MobileNetV1', outputStride:16, multiplier:0.75, quantBytes:2 });
+  }
+
+  // Preload hard-coded background
+  hardBG = await new Promise((res,rej)=>{
+    const img=new Image();
+    img.onload=()=>res(img);
+    img.onerror=rej;
+    img.src=BG_SRC;
+  });
+
+  statusEl.textContent='Models: ready ✅';
+})();
+
+/* ---------- Elements ---------- */
+const srcCanvas=document.getElementById('srcCanvas');
+const outCanvas=document.getElementById('outCanvas');
+/* ✅ use willReadFrequently for frequent readbacks */
+const srcCtx=srcCanvas.getContext('2d', { willReadFrequently: true });
+const outCtx=outCanvas.getContext('2d', { willReadFrequently: true });
+
+const imageFiles=document.getElementById('imageFiles');
+const dirPicker=document.getElementById('dirPicker');
+const btnFolder=document.getElementById('btnFolder');
+const btnProcess=document.getElementById('btnProcess');
+const btnZip=document.getElementById('btnZip');
+const btnClear=document.getElementById('btnClear');
+const downloads=document.getElementById('downloads');
+
+btnFolder.addEventListener('click',()=>dirPicker.click());
+
+btnClear.addEventListener('click',()=>{
+  srcCtx.clearRect(0,0,srcCanvas.width,srcCanvas.height);
+  outCtx.clearRect(0,0,outCanvas.width,outCanvas.height);
+  downloads.innerHTML='';
+  btnZip.disabled=true;
+});
+
+/* Merge folder files into imageFiles */
+dirPicker.addEventListener('change',(e)=>{
+  const dt=new DataTransfer();
+  [...imageFiles.files||[]].forEach(f=>dt.items.add(f));
+  [...e.target.files].forEach(f=>{ if(f.type.startsWith('image/')) dt.items.add(f); });
+  imageFiles.files=dt.files;
+  handleImmediatePreview();
+});
+
+imageFiles.addEventListener('change', handleImmediatePreview);
+
+async function handleImmediatePreview(){
+  const files = [...(imageFiles.files||[])].filter(f=>f.type.startsWith('image/'));
+  if(files.length===0) return;
+  const img=await loadImage(files[0]);
+  const scaled = scaleToMaxSide(img, MAX_INPUT_SIDE);
+  const W = scaled.width || scaled.naturalWidth, H = scaled.height || scaled.naturalHeight;
+  const fit=drawContain(srcCtx, W, H, srcCanvas.width, srcCanvas.height);
+  srcCtx.clearRect(0,0,srcCanvas.width,srcCanvas.height);
+  srcCtx.drawImage(scaled, fit.dx, fit.dy, fit.dw, fit.dh);
+}
+
+btnProcess.addEventListener('click', async ()=>{
+  const files = [...(imageFiles.files||[])].filter(f=>f.type.startsWith('image/'));
+  if(files.length===0){ alert('Please select at least one image.'); return; }
+  if(!blazefaceModel || !bodyPixModel || !hardBG){ alert('Models/BG still loading.'); return; }
+
+  downloads.innerHTML='';
+  const zip = new JSZip();
+
+  for(let i=0;i<files.length;i++){
+    try{
+      const origImg=await loadImage(files[i]);
+      const img = scaleToMaxSide(origImg, MAX_INPUT_SIDE);
+
+      // Source preview
+      const W = img.width || img.naturalWidth, H = img.height || img.naturalHeight;
+      const fit=drawContain(srcCtx, W, H, srcCanvas.width, srcCanvas.height);
+      srcCtx.clearRect(0,0,srcCanvas.width,srcCanvas.height);
+      srcCtx.drawImage(img, fit.dx, fit.dy, fit.dw, fit.dh);
+
+      // Face detect (largest)
+      const preds = await blazefaceModel.estimateFaces(img, false);
+      let faceBox={x:W*0.25,y:H*0.2,w:W*0.5,h:H*0.6};
+      if(preds && preds.length){
+        let best=null, bestArea=-1;
+        for(const p of preds){
+          const [x1,y1]=p.topLeft; const [x2,y2]=p.bottomRight;
+          const w=x2-x1, h=y2-y1; const area=w*h;
+          if(area>bestArea){bestArea=area; best={x:x1,y:y1,w,h};}
+        }
+        if(best) faceBox=best;
+      }
+
+      // Crop around face
+      const ar=ASPECT;
+      const faceCenter={cx: faceBox.x + faceBox.w/2, cy: faceBox.y + faceBox.h/2};
+      const baseSize = Math.max(faceBox.w, faceBox.h) * (2.2/ ZOOM);
+      let cropW = baseSize, cropH = baseSize/ ar;
+      const yOff = Y_OFFSET * cropH;
+      let cropX = faceCenter.cx - cropW/2;
+      let cropY = faceCenter.cy - cropH/2 + yOff;
+      cropX = clamp(cropX, 0, W - cropW);
+      cropY = clamp(cropY, 0, H - cropH);
+
+      // Segmentation
+      const segmentation = await bodyPixModel.segmentPerson(img, {
+        internalResolution: 'medium',
+        segmentationThreshold: 0.9
+      });
+
+      // Build masked person (person kept)
+      const maskCanvas = createCanvas(W, H);
+      const mctx = maskCanvas.getContext('2d', { willReadFrequently: true }); /* ✅ */
+      mctx.drawImage(img, 0,0);
+
+      const mask = bodyPix.toMask(
+        segmentation,
+        {r:0,g:0,b:0,a:255},   // person opaque
+        {r:0,g:0,b:0,a:0}      // background transparent
+      );
+
+      const maskLayer = createCanvas(W, H);
+      const mlctx = maskLayer.getContext('2d', { willReadFrequently: true }); /* ✅ */
+      if(FEATHER_PX>0){ mlctx.filter = `blur(${FEATHER_PX}px)`; }
+      mlctx.putImageData(mask,0,0);
+
+      mctx.globalCompositeOperation = 'destination-in';
+      mctx.drawImage(maskLayer, 0,0);
+      mctx.globalCompositeOperation = 'source-over';
+
+      // Compose final
+      const targetW = ar>=1? OUTPUT_LONG : Math.round(OUTPUT_LONG*ar);
+      const targetH = ar>=1? Math.round(OUTPUT_LONG/ar) : OUTPUT_LONG;
+      outCanvas.width=targetW; outCanvas.height=targetH; outCtx.clearRect(0,0,targetW,targetH);
+
+      // Draw BG (cover)
+      const bgScale = Math.max(targetW/hardBG.width, targetH/hardBG.height);
+      const bgDW = hardBG.width * bgScale, bgDH = hardBG.height * bgScale;
+      const bgDX = (targetW - bgDW) / 2, bgDY = (targetH - bgDH) / 2;
+      outCtx.drawImage(hardBG, bgDX, bgDY, bgDW, bgDH);
+
+      // Draw foreground crop
+      const scaleToTarget = Math.min(targetW/cropW, targetH/cropH);
+      const drawW = cropW * scaleToTarget, drawH = cropH * scaleToTarget;
+      const drawX = (targetW - drawW)/2, drawY = (targetH - drawH)/2;
+      outCtx.imageSmoothingQuality='high';
+      outCtx.drawImage(maskCanvas, cropX, cropY, cropW, cropH, drawX, drawY, drawW, drawH);
+
+      // Export
+      const dataUrl = outCanvas.toDataURL(MIME);
+      const outName = FILE_PREFIX + (i+1) + (MIME==='image/png'?'.png':'.jpg');
+
+      const link = document.createElement("a");
+      link.href = dataUrl; link.download = outName; link.textContent = "⬇ " + outName;
+      downloads.appendChild(link); downloads.appendChild(document.createElement("br"));
+
+      const base64 = dataUrl.split(",")[1];
+      zip.file(outName, base64, { base64: true });
+
+      // Yield to free memory between files
+      await tf.nextFrame();
+
+    } catch(err){
+      const p = document.createElement('p');
+      p.className = 'error';
+      p.textContent = `⚠️ Skipped "${files[i].name}": ${err.message || err}`;
+      downloads.appendChild(p);
+      await tf.nextFrame();
+      continue;
+    }
+  }
+
+  btnZip.disabled = false;
+  btnZip.onclick = async ()=>{
+    const blob = await zip.generateAsync({ type:"blob" });
+    saveAs(blob, "processed_images.zip");
+  };
+});
+</script>
+</body>
+</html>
